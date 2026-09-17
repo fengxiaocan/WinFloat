@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>WinFloat</RootNamespace>
+    <AssemblyName>WinFloat</AssemblyName>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\WinFloat.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <AssemblyTitle>WinFloat</AssemblyTitle>
+    <AssemblyDescription>Windows lightweight performance floating monitor</AssemblyDescription>
+    <!-- WPF uses the manifest/native initialization for PerMonitorV2; WinForms emits WFAC010 for that intentional manifest. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <EmbeddedResource Include="Assets\WinFloat.ico" LogicalName="WinFloat.Assets.WinFloat.ico" />
+  </ItemGroup>
+</Project>
