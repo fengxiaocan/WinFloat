@@ -10,6 +10,56 @@ internal static class NativeMethods
     internal const long WsExTransparent = 0x00000020L;
     internal const long WsExLayered = 0x00080000L;
     internal const long WsExAppWindow = 0x00040000L;
+    internal const long WsExTopMost = 0x00000008L;
+
+    internal static readonly IntPtr HwndTopMost = new(-1);
+    internal static readonly IntPtr HwndNoTopMost = new(-2);
+    internal static readonly IntPtr HwndTop = new(0);
+
+    internal const uint SwpNosize = 0x0001;
+    internal const uint SwpNomove = 0x0002;
+    internal const uint SwpNozorder = 0x0004;
+    internal const uint SwpNoactivate = 0x0010;
+    internal const uint SwpFramechanged = 0x0020;
+    internal const uint SwpShowWindow = 0x0040;
+
+    internal const uint EventSystemForeground = 0x0003;
+    internal const uint WinEventOutOfContext = 0x0000;
+    internal const uint WinEventSkipOwnProcess = 0x0002;
+
+    internal delegate void WinEventDelegate(
+        IntPtr hWinEventHook,
+        uint eventType,
+        IntPtr hwnd,
+        int idObject,
+        int idChild,
+        uint dwEventThread,
+        uint dwmsEventTime);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        uint uFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern IntPtr SetWinEventHook(
+        uint eventMin,
+        uint eventMax,
+        IntPtr hmodWinEventProc,
+        WinEventDelegate lpfnWinEventProc,
+        uint idProcess,
+        uint idThread,
+        uint dwFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool UnhookWinEvent(IntPtr hWinEventHook);
 
     private static readonly IntPtr PerMonitorAwareV2 = new(-4);
 

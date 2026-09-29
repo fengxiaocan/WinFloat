@@ -19,6 +19,9 @@ public partial class MainWindow : Window
     private bool _isDragging;
     private bool _isHovering;
     private bool _hasPositioned;
+    private bool _isSettingsOpen;
+    private NativeMethods.WinEventDelegate? _foregroundEventDelegate;
+    private IntPtr _foregroundEventHook = IntPtr.Zero;
 
     public MainWindow(
         AppSettings settings,
@@ -40,6 +43,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        UnhookForegroundHook();
         _monitorService.SnapshotUpdated -= OnSnapshotUpdated;
         base.OnClosed(e);
     }
@@ -51,20 +55,30 @@ public partial class MainWindow : Window
         else
         {
             Show();
+            EnsureTopmost();
             ActivateSafely();
         }
     }
 
     public void OpenSettings()
     {
-        var dialog = new SettingsWindow(Settings, _monitorService, _startupService)
+        _isSettingsOpen = true;
+        try
         {
-            Owner = this
-        };
+            var dialog = new SettingsWindow(Settings, _monitorService, _startupService)
+            {
+                Owner = this
+            };
 
-        dialog.SettingsSaved += OnSettingsSaved;
-        dialog.ShowDialog();
-        dialog.SettingsSaved -= OnSettingsSaved;
+            dialog.SettingsSaved += OnSettingsSaved;
+            dialog.ShowDialog();
+            dialog.SettingsSaved -= OnSettingsSaved;
+        }
+        finally
+        {
+            _isSettingsOpen = false;
+            EnsureTopmost();
+        }
     }
 
     public void SetLockWindow(bool value)
@@ -83,6 +97,7 @@ public partial class MainWindow : Window
     {
         Settings.AlwaysOnTop = value;
         SaveAndApply();
+        EnsureTopmost();
     }
 
     public void SetStartWithWindows(bool value)
@@ -105,6 +120,8 @@ public partial class MainWindow : Window
     {
         _handle = new WindowInteropHelper(this).Handle;
         ApplyWindowStyles();
+        InitForegroundHook();
+        EnsureTopmost();
     }
 
     private void Window_OnLoaded(object sender, RoutedEventArgs e)
@@ -114,6 +131,7 @@ public partial class MainWindow : Window
             _hasPositioned = true;
             PositionWindow();
         }
+        EnsureTopmost();
     }
 
     private void Window_OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -174,13 +192,17 @@ public partial class MainWindow : Window
         finally
         {
             _isDragging = false;
+            EnsureTopmost();
         }
     }
 
     private void RootBorder_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (_isDragging)
+        {
             SavePosition();
+            EnsureTopmost();
+        }
     }
 
     private void RootBorder_OnMouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -223,6 +245,17 @@ public partial class MainWindow : Window
         ApplyWindowStyles();
         ApplyVisualStyle();
         ApplyLayout();
+        if (Settings.AlwaysOnTop)
+            EnsureTopmost();
+        else if (_handle != IntPtr.Zero)
+        {
+            NativeMethods.SetWindowPos(
+                _handle,
+                NativeMethods.HwndNoTopMost,
+                0, 0, 0, 0,
+                NativeMethods.SwpNomove | NativeMethods.SwpNosize | NativeMethods.SwpNoactivate);
+        }
+
         if (raiseChanged)
             SettingsChanged?.Invoke();
     }
@@ -235,12 +268,22 @@ public partial class MainWindow : Window
         var styles = NativeMethods.GetWindowLongPtr(_handle, NativeMethods.GwlExStyle).ToInt64();
         styles |= NativeMethods.WsExToolWindow | NativeMethods.WsExNoActivate | NativeMethods.WsExLayered;
         styles &= ~NativeMethods.WsExAppWindow;
+        if (Settings.AlwaysOnTop)
+            styles |= NativeMethods.WsExTopMost;
+        else
+            styles &= ~NativeMethods.WsExTopMost;
+
         if (Settings.ClickThrough)
             styles |= NativeMethods.WsExTransparent;
         else
             styles &= ~NativeMethods.WsExTransparent;
 
         NativeMethods.SetWindowLongPtr(_handle, NativeMethods.GwlExStyle, new IntPtr(styles));
+        NativeMethods.SetWindowPos(
+            _handle,
+            Settings.AlwaysOnTop ? NativeMethods.HwndTopMost : NativeMethods.HwndNoTopMost,
+            0, 0, 0, 0,
+            NativeMethods.SwpNomove | NativeMethods.SwpNosize | NativeMethods.SwpNoactivate | NativeMethods.SwpFramechanged);
     }
 
     private void ApplyVisualStyle()
@@ -321,6 +364,7 @@ public partial class MainWindow : Window
 
         SetMetricVisibility(settings, snapshot);
         ApplyMetricColors(settings, snapshot);
+        EnsureTopmost();
     }
 
     private void SetMetricVisibility(AppSettings settings, MonitorSnapshot snapshot)
@@ -451,6 +495,78 @@ public partial class MainWindow : Window
         if (Settings.ClickThrough)
             return;
         // The overlay intentionally remains non-activating; showing it is sufficient.
+    }
+
+    public void EnsureTopmost()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(EnsureTopmost));
+            return;
+        }
+
+        if (_handle == IntPtr.Zero)
+        {
+            _handle = new WindowInteropHelper(this).Handle;
+            if (_handle == IntPtr.Zero)
+                return;
+        }
+
+        if (!Settings.AlwaysOnTop || _isDragging || !IsVisible || _isSettingsOpen)
+            return;
+
+        if (!Topmost)
+            Topmost = true;
+
+        NativeMethods.SetWindowPos(
+            _handle,
+            NativeMethods.HwndTopMost,
+            0, 0, 0, 0,
+            NativeMethods.SwpNomove | NativeMethods.SwpNosize | NativeMethods.SwpNoactivate);
+    }
+
+    private void InitForegroundHook()
+    {
+        if (_foregroundEventHook != IntPtr.Zero)
+            return;
+
+        _foregroundEventDelegate = OnForegroundChanged;
+        _foregroundEventHook = NativeMethods.SetWinEventHook(
+            NativeMethods.EventSystemForeground,
+            NativeMethods.EventSystemForeground,
+            IntPtr.Zero,
+            _foregroundEventDelegate,
+            0,
+            0,
+            NativeMethods.WinEventOutOfContext | NativeMethods.WinEventSkipOwnProcess);
+    }
+
+    private void UnhookForegroundHook()
+    {
+        if (_foregroundEventHook != IntPtr.Zero)
+        {
+            NativeMethods.UnhookWinEvent(_foregroundEventHook);
+            _foregroundEventHook = IntPtr.Zero;
+        }
+    }
+
+    private void OnForegroundChanged(
+        IntPtr hWinEventHook,
+        uint eventType,
+        IntPtr hwnd,
+        int idObject,
+        int idChild,
+        uint dwEventThread,
+        uint dwmsEventTime)
+    {
+        if (_handle == IntPtr.Zero || !Settings.AlwaysOnTop || _isDragging || !IsVisible || _isSettingsOpen)
+            return;
+
+        if (hwnd == _handle)
+            return;
+
+        EnsureTopmost();
+        Dispatcher.BeginInvoke(new Action(EnsureTopmost), System.Windows.Threading.DispatcherPriority.Background);
     }
 }
 

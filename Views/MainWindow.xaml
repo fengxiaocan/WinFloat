@@ -9,6 +9,7 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
+        Topmost="True"
         SizeToContent="WidthAndHeight"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True"
